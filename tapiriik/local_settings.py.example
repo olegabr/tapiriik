@@ -5,12 +5,18 @@
 # It only needs to be accessible to the client browser
 WEB_ROOT = "http://localhost:8000"
 
+# Absolute path to the directory static files should be collected to.
+# Don't put anything in this directory yourself; store your static files
+# in apps' "static/" subdirectories and in STATICFILES_DIRS.
+# Example: "/var/www/example.com/static/"
+STATIC_ROOT = '/wamp/www/tapiriik/tapiriik/static/'
+
 # This is where sync logs show up
 # It is the only directory that needs to be writable by the webapp user
 USER_SYNC_LOGS = "./"
 
 # How many total sync workers are expected to be running
-TOTAL_SYNC_WORKERS = #
+TOTAL_SYNC_WORKERS = 1
 
 # These settings are used to communicate with each respective service
 # Register your installation with each service to get these values
@@ -58,6 +64,10 @@ SPORTTRACKS_CLIENT_SECRET = "####"
 STRAVA_CLIENT_SECRET = "####"
 STRAVA_CLIENT_ID = "####"
 STRAVA_RATE_LIMITS = []
+
+VTREKE_CLIENT_SECRET = "####"
+VTREKE_CLIENT_ID = "####"
+VTREKE_RATE_LIMITS = []
 
 TRAINASONE_SERVER_URL = "https://beta.trainasone.com"
 TRAINASONE_CLIENT_SECRET = "####"
