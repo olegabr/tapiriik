@@ -17,6 +17,7 @@ def privacy(request):
     services["garminconnect"].update({"email": OPTIN, "password": OPTIN, "tokens": NO, "metadata": YES, "data":NO})
     services["garminconnect2"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":CACHED})
     services["strava"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":NO})
+    services["vtreke"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":NO})
     services["sporttracks"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":NO})
     services["dropbox"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":NO})
     services["runkeeper"].update({"email": NO, "password": NO, "tokens": YES, "metadata": YES, "data":NO})

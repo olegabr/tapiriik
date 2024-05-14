@@ -4,6 +4,8 @@ from tapiriik.services.RunKeeper import RunKeeperService
 RunKeeper = RunKeeperService()
 from tapiriik.services.Strava import StravaService
 Strava = StravaService()
+from tapiriik.services.VTreke import VTrekeService
+VTreke = VTrekeService()
 from tapiriik.services.Endomondo import EndomondoService
 Endomondo = EndomondoService()
 from tapiriik.services.Dropbox import DropboxService

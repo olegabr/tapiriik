@@ -30,6 +30,7 @@ class Service:
             private_svc_map.get("garminconnect2"),
             RunKeeper,
             Strava,
+            VTreke,
             GarminConnect,
             Endomondo,
             SportTracks,
@@ -66,6 +67,7 @@ class Service:
             TrainAsONE,
             VeloHero, # PWX export, no temperature
             Strava, # No laps
+            VTreke, # No laps
             Endomondo, # No laps, no cadence
             RunKeeper, # No laps, no cadence, no power
             BeginnerTriathlete, # No temperature

@@ -3,13 +3,42 @@
 
 # This is the url that is used for redirects after logging in to each service
 # It only needs to be accessible to the client browser
-WEB_ROOT = "http://localhost:8000"
+WEB_ROOT = "https://vtreke.ru/syncme"
 
 # Absolute path to the directory static files should be collected to.
 # Don't put anything in this directory yourself; store your static files
 # in apps' "static/" subdirectories and in STATICFILES_DIRS.
 # Example: "/var/www/example.com/static/"
 STATIC_ROOT = '/wamp/www/tapiriik/tapiriik/static/'
+
+# URL prefix for static files.
+# Example: "http://example.com/static/", "http://static.example.com/"
+STATIC_URL = '/syncme/static/'
+
+MIDDLEWARE  = (
+    "request_logging.middleware.LoggingMiddleware",
+)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "DEBUG",
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "DEBUG",  # change debug level as appropiate
+            "propagate": False,
+        },
+    },
+}
 
 # This is where sync logs show up
 # It is the only directory that needs to be writable by the webapp user

@@ -125,13 +125,13 @@ class GarminConnectService(ServiceBase):
     _garmin_signin_headers = {
         "origin": "https://sso.garmin.com"
     }
-
     def __init__(self):
         cachedHierarchy = cachedb.gc_type_hierarchy.find_one()
         if not cachedHierarchy:
-            rawHierarchy = requests.get("https://connect.garmin.com/modern/proxy/activity-service/activity/activityTypes", headers=self._obligatory_headers).text
-            self._activityHierarchy = json.loads(rawHierarchy)
-            cachedb.gc_type_hierarchy.insert({"Hierarchy": rawHierarchy})
+            # rawHierarchy = requests.get("https://connect.garmin.com/modern/proxy/activity-service/activity/activityTypes", headers=self._obligatory_headers).text
+            # logger.debug(rawHierarchy)
+            self._activityHierarchy = [] #json.loads(rawHierarchy)
+            # cachedb.gc_type_hierarchy.insert({"Hierarchy": rawHierarchy})
         else:
             self._activityHierarchy = json.loads(cachedHierarchy["Hierarchy"])
             
@@ -294,13 +294,16 @@ class GarminConnectService(ServiceBase):
         return "https://connect.garmin.com/modern/activity/%d" % uploadId
 
     def _resolveActivityType(self, act_type):
+        logger.debug(act_type)
+        if act_type not in self._activityMappings:
+            raise ValueError("Activity type not found in activity hierarchy")
         # Mostly there are two levels of a hierarchy, so we don't really need this as the parent is included in the listing.
         # But maybe they'll change that some day?
-        while act_type not in self._activityMappings:
-            try:
-                act_type = self._typeIdKeyMap[self._typeKeyParentMap[act_type]]
-            except IndexError:
-                raise ValueError("Activity type not found in activity hierarchy")
+        # while act_type not in self._activityMappings:
+        #     try:
+        #         act_type = self._typeIdKeyMap[self._typeKeyParentMap[act_type]]
+        #     except IndexError:
+        #         raise ValueError("Activity type not found in activity hierarchy")
         return self._activityMappings[act_type]
 
     def DownloadActivityList(self, serviceRecord, exhaustive=False):
