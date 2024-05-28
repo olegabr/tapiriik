@@ -27,6 +27,11 @@ import json
 from urllib.parse import urlencode
 logger = logging.getLogger(__name__)
 
+import garth
+from garth.exc import GarthException
+from garth.auth_tokens import OAuth1Token, OAuth2Token
+from garth.utils import asdict
+
 class GarminConnectService(ServiceBase):
     ID = "garminconnect"
     DisplayName = "Garmin Connect"
@@ -172,6 +177,9 @@ class GarminConnectService(ServiceBase):
     def _request_with_reauth(self, req_lambda, serviceRecord=None, email=None, password=None, force_skip_cache=False):
         for i in range(self._reauthAttempts + 1):
             session = self._get_session(record=serviceRecord, email=email, password=password, skip_cache=(force_skip_cache or i > 0))
+            if not session:
+                logger.info("_request_with_reauth failed for %s" % email)
+                continue
             self._rate_limit()
             result = req_lambda(session)
             if result.status_code not in (403, 500):
@@ -179,100 +187,125 @@ class GarminConnectService(ServiceBase):
         # Pass the failed response back any ways - another handler will catch it and provide a nicer error
         return result
 
+    def _load_session_data(self, oauth1_token: str, oauth2_token: str):
+        oauth1 = OAuth1Token(**json.loads(oauth1_token))
+        oauth2 = OAuth2Token(**json.loads(oauth2_token))
+        garth.configure(
+            oauth1_token=oauth1, oauth2_token=oauth2, domain=oauth1.domain
+        )
+        return garth
+
+    def _get_session_data(self):
+        if not garth.oauth1_token:
+            return None
+        if not garth.oauth2_token:
+            return None
+        return [json.dumps(asdict(garth.oauth1_token)), json.dumps(asdict(garth.oauth2_token))]
+
     def _get_session(self, record=None, email=None, password=None, skip_cache=False):
         from tapiriik.auth.credential_storage import CredentialStore
         cached = self._sessionCache.Get(record.ExternalID if record else email)
         if cached and not skip_cache:
                 logger.debug("Using cached credential")
-                return cached
+                return self._load_session_data(cached[0], cached[1])
         if record:
             #  longing for C style overloads...
             password = CredentialStore.Decrypt(record.ExtendedAuthorization["Password"])
             email = CredentialStore.Decrypt(record.ExtendedAuthorization["Email"])
 
-        session = requests.Session()
+        session = None
+        try:
+            garth.client.username
+        except GarthException:
+            # Session is expired. You'll need to log in again
+            garth.login(email, password)
+            session = self._get_session_data()
 
-        # JSIG CAS, cool I guess.
-        # Not quite OAuth though, so I'll continue to collect raw credentials.
-        # Commented stuff left in case this ever breaks because of missing parameters...
-        data = {
-            "username": email,
-            "password": password,
-            "_eventId": "submit",
-            "embed": "true",
-            # "displayNameRequired": "false"
-        }
-        params = {
-            "service": "https://connect.garmin.com/modern",
-            # "redirectAfterAccountLoginUrl": "http://connect.garmin.com/modern",
-            # "redirectAfterAccountCreationUrl": "http://connect.garmin.com/modern",
-            # "webhost": "olaxpw-connect00.garmin.com",
-            "clientId": "GarminConnect",
-            "gauthHost": "https://sso.garmin.com/sso",
-            # "rememberMeShown": "true",
-            # "rememberMeChecked": "false",
-            "consumeServiceTicket": "false",
-            # "id": "gauth-widget",
-            # "embedWidget": "false",
-            # "cssUrl": "https://static.garmincdn.com/com.garmin.connect/ui/src-css/gauth-custom.css",
-            # "source": "http://connect.garmin.com/en-US/signin",
-            # "createAccountShown": "true",
-            # "openCreateAccount": "false",
-            # "usernameShown": "true",
-            # "displayNameShown": "false",
-            # "initialFocus": "true",
-            # "locale": "en"
-        }
-        # I may never understand what motivates people to mangle a perfectly good protocol like HTTP in the ways they do...
-        preResp = session.get("https://sso.garmin.com/sso/signin", params=params)
-        if preResp.status_code != 200:
-            raise APIException("SSO prestart error %s %s" % (preResp.status_code, preResp.text))
+        if not session:
+            return None
+        # session = requests.Session()
 
-        ssoResp = session.post("https://sso.garmin.com/sso/signin", headers=self._garmin_signin_headers, params=params, data=data, allow_redirects=False)
-        if ssoResp.status_code != 200 or "temporarily unavailable" in ssoResp.text:
-            raise APIException("SSO error %s %s" % (ssoResp.status_code, ssoResp.text))
+        # # JSIG CAS, cool I guess.
+        # # Not quite OAuth though, so I'll continue to collect raw credentials.
+        # # Commented stuff left in case this ever breaks because of missing parameters...
+        # data = {
+        #     "username": email,
+        #     "password": password,
+        #     "_eventId": "submit",
+        #     "embed": "true",
+        #     # "displayNameRequired": "false"
+        # }
+        # params = {
+        #     "service": "https://connect.garmin.com/modern",
+        #     # "redirectAfterAccountLoginUrl": "http://connect.garmin.com/modern",
+        #     # "redirectAfterAccountCreationUrl": "http://connect.garmin.com/modern",
+        #     # "webhost": "olaxpw-connect00.garmin.com",
+        #     "clientId": "GarminConnect",
+        #     "gauthHost": "https://sso.garmin.com/sso",
+        #     # "rememberMeShown": "true",
+        #     # "rememberMeChecked": "false",
+        #     "consumeServiceTicket": "false",
+        #     # "id": "gauth-widget",
+        #     # "embedWidget": "false",
+        #     # "cssUrl": "https://static.garmincdn.com/com.garmin.connect/ui/src-css/gauth-custom.css",
+        #     # "source": "http://connect.garmin.com/en-US/signin",
+        #     # "createAccountShown": "true",
+        #     # "openCreateAccount": "false",
+        #     # "usernameShown": "true",
+        #     # "displayNameShown": "false",
+        #     # "initialFocus": "true",
+        #     # "locale": "en"
+        # }
+        # # I may never understand what motivates people to mangle a perfectly good protocol like HTTP in the ways they do...
+        # preResp = session.get("https://sso.garmin.com/sso/signin", params=params)
+        # if preResp.status_code != 200:
+        #     raise APIException("SSO prestart error %s %s" % (preResp.status_code, preResp.text))
 
-        if ">sendEvent('FAIL')" in ssoResp.text:
-            raise APIException("Invalid login", block=True, user_exception=UserException(UserExceptionType.Authorization, intervention_required=True))
-        if ">sendEvent('ACCOUNT_LOCKED')" in ssoResp.text:
-            raise APIException("Account Locked", block=True, user_exception=UserException(UserExceptionType.Locked, intervention_required=True))
+        # ssoResp = session.post("https://sso.garmin.com/sso/signin", headers=self._garmin_signin_headers, params=params, data=data, allow_redirects=False)
+        # if ssoResp.status_code != 200 or "temporarily unavailable" in ssoResp.text:
+        #     raise APIException("SSO error %s %s" % (ssoResp.status_code, ssoResp.text))
 
-        if "renewPassword" in ssoResp.text:
-            raise APIException("Reset password", block=True, user_exception=UserException(UserExceptionType.RenewPassword, intervention_required=True))
+        # if ">sendEvent('FAIL')" in ssoResp.text:
+        #     raise APIException("Invalid login", block=True, user_exception=UserException(UserExceptionType.Authorization, intervention_required=True))
+        # if ">sendEvent('ACCOUNT_LOCKED')" in ssoResp.text:
+        #     raise APIException("Account Locked", block=True, user_exception=UserException(UserExceptionType.Locked, intervention_required=True))
 
-        # ...AND WE'RE NOT DONE YET!
+        # if "renewPassword" in ssoResp.text:
+        #     raise APIException("Reset password", block=True, user_exception=UserException(UserExceptionType.RenewPassword, intervention_required=True))
 
-        self._rate_limit()
-        gcRedeemResp = session.get("https://connect.garmin.com/modern", allow_redirects=False)
-        if gcRedeemResp.status_code != 302:
-            raise APIException("GC redeem-start error %s %s" % (gcRedeemResp.status_code, gcRedeemResp.text))
-        url_prefix = "https://connect.garmin.com"
-        # There are 6 redirects that need to be followed to get the correct cookie
-        # ... :(
-        max_redirect_count = 7
-        current_redirect_count = 1
-        while True:
-            self._rate_limit()
-            url = gcRedeemResp.headers["location"]
-            # Fix up relative redirects.
-            if url.startswith("/"):
-                url = url_prefix + url
-            url_prefix = "/".join(url.split("/")[:3])
-            gcRedeemResp = session.get(url, allow_redirects=False)
+        # # ...AND WE'RE NOT DONE YET!
 
-            if current_redirect_count >= max_redirect_count and gcRedeemResp.status_code != 200:
-                raise APIException("GC redeem %d/%d error %s %s" % (current_redirect_count, max_redirect_count, gcRedeemResp.status_code, gcRedeemResp.text))
-            if gcRedeemResp.status_code == 200 or gcRedeemResp.status_code == 404:
-                break
-            current_redirect_count += 1
-            if current_redirect_count > max_redirect_count:
-                break
+        # self._rate_limit()
+        # gcRedeemResp = session.get("https://connect.garmin.com/modern", allow_redirects=False)
+        # if gcRedeemResp.status_code != 302:
+        #     raise APIException("GC redeem-start error %s %s" % (gcRedeemResp.status_code, gcRedeemResp.text))
+        # url_prefix = "https://connect.garmin.com"
+        # # There are 6 redirects that need to be followed to get the correct cookie
+        # # ... :(
+        # max_redirect_count = 7
+        # current_redirect_count = 1
+        # while True:
+        #     self._rate_limit()
+        #     url = gcRedeemResp.headers["location"]
+        #     # Fix up relative redirects.
+        #     if url.startswith("/"):
+        #         url = url_prefix + url
+        #     url_prefix = "/".join(url.split("/")[:3])
+        #     gcRedeemResp = session.get(url, allow_redirects=False)
+
+        #     if current_redirect_count >= max_redirect_count and gcRedeemResp.status_code != 200:
+        #         raise APIException("GC redeem %d/%d error %s %s" % (current_redirect_count, max_redirect_count, gcRedeemResp.status_code, gcRedeemResp.text))
+        #     if gcRedeemResp.status_code == 200 or gcRedeemResp.status_code == 404:
+        #         break
+        #     current_redirect_count += 1
+        #     if current_redirect_count > max_redirect_count:
+        #         break
 
         self._sessionCache.Set(record.ExternalID if record else email, session)
 
-        session.headers.update(self._obligatory_headers)
+        # session.headers.update(self._obligatory_headers)
 
-        return session
+        return garth
 
     def WebInit(self):
         self.UserAuthorizationURL = WEB_ROOT + reverse("auth_simple", kwargs={"service": self.ID})
@@ -280,12 +313,12 @@ class GarminConnectService(ServiceBase):
     def Authorize(self, email, password):
         from tapiriik.auth.credential_storage import CredentialStore
         session = self._get_session(email=email, password=password, skip_cache=True)
+        if not session:
+            logger.info("Authorize failed for %s" % email)
+            return None
         self._rate_limit()
         try:
-            dashboard = session.get("http://connect.garmin.com/modern")
-            userdata_json_str = re.search(r"VIEWER_SOCIAL_PROFILE\s*=\s*JSON\.parse\((.+)\);$", dashboard.text, re.MULTILINE).group(1)
-            userdata = json.loads(json.loads(userdata_json_str))
-            username = userdata["displayName"]
+            username = session.client.username
         except Exception as e:
             raise APIException("Unable to retrieve username: %s" % e, block=True, user_exception=UserException(UserExceptionType.Authorization, intervention_required=True))
         return (username, {}, {"Email": CredentialStore.Encrypt(email), "Password": CredentialStore.Encrypt(password)})
@@ -316,7 +349,7 @@ class GarminConnectService(ServiceBase):
         while True:
             logger.debug("Req with " + str({"start": (page - 1) * pageSz, "limit": pageSz}))
 
-            res = self._request_with_reauth(lambda session: session.get("https://connect.garmin.com/modern/proxy/activitylist-service/activities/search/activities", params={"start": (page - 1) * pageSz, "limit": pageSz}), serviceRecord, force_skip_cache=force_reauth)
+            res = self._request_with_reauth(lambda session: session.connectapi("/activitylist-service/activities/search/activities", params={"start": (page - 1) * pageSz, "limit": pageSz}), serviceRecord, force_skip_cache=force_reauth)
             force_reauth = False
 
             try:
@@ -379,7 +412,7 @@ class GarminConnectService(ServiceBase):
     def _downloadActivitySummary(self, serviceRecord, activity):
         activityID = activity.ServiceData["ActivityID"]
 
-        summary_resp = self._request_with_reauth(lambda session: session.get("https://connect.garmin.com/modern/proxy/activity-service/activity/" + str(activityID)), serviceRecord)
+        summary_resp = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/" + str(activityID)), serviceRecord)
 
         try:
             summary_data = summary_resp.json()
@@ -420,7 +453,7 @@ class GarminConnectService(ServiceBase):
 
         applyStats(summary_data["summaryDTO"], activity.Stats)
 
-        laps_resp = self._request_with_reauth(lambda session: session.get("https://connect.garmin.com/modern/proxy/activity-service/activity/%s/splits" % str(activityID)), serviceRecord)
+        laps_resp = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/%s/splits" % str(activityID)), serviceRecord)
         try:
             laps_data = laps_resp.json()
         except ValueError:
@@ -468,7 +501,7 @@ class GarminConnectService(ServiceBase):
 
         # https://connect.garmin.com/modern/proxy/activity-service/activity/###/details
         activityID = activity.ServiceData["ActivityID"]
-        res = self._request_with_reauth(lambda session: session.get("https://connect.garmin.com/modern/proxy/activity-service/activity/{}/details?maxSize=999999999".format(activityID)), serviceRecord)
+        res = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/{}/details?maxSize=999999999".format(activityID)), serviceRecord)
         try:
             raw_data = res.json()
         except ValueError:
@@ -554,7 +587,8 @@ class GarminConnectService(ServiceBase):
         files = {"data": ("tap-sync-" + str(os.getpid()) + "-" + activity.UID + ".fit", fit_file)}
 
         res = self._request_with_reauth(
-            lambda session: session.post("https://connect.garmin.com/modern/proxy/upload-service/upload/.fit",
+            lambda session: session.connectapi("/upload-service/upload/.fit",
+                                         method="POST",
                                          files=files,
                                          headers={"nk": "NT"}),
             serviceRecord)
@@ -598,7 +632,7 @@ class GarminConnectService(ServiceBase):
         if metadata_object:
             metadata_object["activityId"] = actid
             encoding_headers = {"Content-Type": "application/json; charset=UTF-8"} # GC really, really needs this part, otherwise it throws obscure errors like "Invalid signature for signature method HMAC-SHA1"
-            res = self._request_with_reauth(lambda session: session.put("https://connect.garmin.com/proxy/activity-service/activity/" + str(actid), data=json.dumps(metadata_object), headers=encoding_headers), serviceRecord)
+            res = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/" + str(actid), data=json.dumps(metadata_object), headers=encoding_headers, method="PUT"), serviceRecord)
             if res.status_code != 204:
                 raise APIWarning("Unable to set activity metadata - %d %s" % (res.status_code, res.text))
 
@@ -619,7 +653,11 @@ class GarminConnectService(ServiceBase):
         user_name = self._user_watch_user(serviceRecord)["Name"]
         logger.info("Requesting connection to %s from %s" % (user_name, serviceRecord.ExternalID))
         self._rate_limit()
-        resp = self._get_session(record=serviceRecord, skip_cache=True).put("https://connect.garmin.com/proxy/userprofile-service/connection/request/%s" % user_name)
+        session = self._get_session(record=serviceRecord, skip_cache=True)
+        if not session:
+            logger.info("SubscribeToPartialSyncTrigger failed for %s" % user_name)
+            return None
+        resp = session.connectapi("/userprofile-service/connection/request/%s" % user_name, method="PUT")
         try:
             assert resp.status_code == 200
             assert resp.json()["requestStatus"] == "Created"
@@ -637,9 +675,12 @@ class GarminConnectService(ServiceBase):
         # Unfortunately there's no way to delete a pending request - the poll worker will do this from the other end
         active_watch_user = self._user_watch_user(serviceRecord)
         session = self._get_session(email=active_watch_user["Username"], password=active_watch_user["Password"], skip_cache=True)
+        if not session:
+            logger.info("UnsubscribeFromPartialSyncTrigger failed for %s" % active_watch_user["Username"])
+            return None
         if "WatchConnectionID" in serviceRecord.GetConfiguration():
             self._rate_limit()
-            dc_resp = session.put("https://connect.garmin.com/modern/proxy/userprofile-service/connection/end/%s" % serviceRecord.GetConfiguration()["WatchConnectionID"])
+            dc_resp = session.connectapi("/userprofile-service/connection/end/%s" % serviceRecord.GetConfiguration()["WatchConnectionID"], method="PUT")
             if dc_resp.status_code != 200:
                 raise APIException("Error disconnecting user watch accunt %s from %s: %s %s" % (active_watch_user, serviceRecord.ExternalID, dc_resp.status_code, dc_resp.text))
 
@@ -682,7 +723,7 @@ class GarminConnectService(ServiceBase):
             for x in range(SERVER_ERROR_RETRIES):
                 logger.debug("Fetching activity list from %d - attempt %d", i, x)
                 watch_activities_resp = self._request_with_reauth(
-                    lambda session: session.get("https://connect.garmin.com/modern/proxy/activitylist-service/activities/subscriptionFeed",
+                    lambda session: session.connectapi("/activitylist-service/activities/subscriptionFeed",
                                                 params={"limit": PAGE_SIZE, "start": i}),
                     **sess_args)
                 if watch_activities_resp.status_code != 500:
@@ -713,7 +754,7 @@ class GarminConnectService(ServiceBase):
             self._rate_limit()
             logger.debug("Fetching connection request list - attempt %d", x)
             pending_connections_resp = self._request_with_reauth(
-                lambda session: session.get("https://connect.garmin.com/modern/proxy/userprofile-service/connection/pending"),
+                lambda session: session.connectapi("/userprofile-service/connection/pending"),
                 **sess_args)
             if pending_connections_resp.status_code != 500:
                 break
@@ -728,14 +769,14 @@ class GarminConnectService(ServiceBase):
                 if pending_connect["displayName"] in valid_pending_connections_external_ids:
                     self._rate_limit()
                     connect_resp = self._request_with_reauth(
-                        lambda session: session.put("https://connect.garmin.com/modern/proxy/userprofile-service/connection/accept/%s" % pending_connect["connectionRequestId"]),
+                        lambda session: session.connectapi("/userprofile-service/connection/accept/%s" % pending_connect["connectionRequestId"], method="PUT"),
                         **sess_args)
                     if connect_resp.status_code != 200:
                         logger.error("Error accepting request on watch account %s: %s %s" % (watch_user["Name"], connect_resp.status_code, connect_resp.text))
                 else:
                     self._rate_limit()
                     self._request_with_reauth(
-                        lambda session: session.put("https://connect.garmin.com/modern/proxy/userprofile-service/connection/decline/%s" % pending_connect["connectionRequestId"]),
+                        lambda session: session.connectapi("/userprofile-service/connection/decline/%s" % pending_connect["connectionRequestId"], method="PUT"),
                         **sess_args)
 
         return to_sync_ids
@@ -750,6 +791,10 @@ class GarminConnectService(ServiceBase):
 
     def DeleteActivity(self, serviceRecord, uploadId):
         session = self._get_session(record=serviceRecord)
+        if not session:
+            active_watch_user = self._user_watch_user(serviceRecord)
+            logger.info("DeleteActivity failed for %s" % active_watch_user["Username"])
+            return None
         self._rate_limit()
-        del_res = session.delete("https://connect.garmin.com/modern/proxy/activity-service/activity/%d" % uploadId)
+        del_res = session.connectapi("/activity-service/activity/%d" % uploadId, method="DELETE")
         del_res.raise_for_status()

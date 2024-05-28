@@ -14,3 +14,4 @@ django-ipware
 smashrun-client>=0.6.0
 beautifulsoup4
 django-request-logging
+garth
