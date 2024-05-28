@@ -181,6 +181,19 @@ class VTrekeService(ServiceBase):
     def UploadActivity(self, serviceRecord, activity):
         logger.info("Activity tz " + str(activity.TZ) + " dt tz " + str(activity.StartTime.tzinfo) + " starttime " + str(activity.StartTime))
 
+        if serviceRecord.HasExtendedAuthorizationDetails():
+            extendedAuthorization = serviceRecord.ExtendedAuthorization
+            from tapiriik.auth.credential_storage import CredentialStore
+            register = CredentialStore.Decrypt(extendedAuthorization["Password"])
+            logger.debug("Activity register = " + str(register))
+            if (str(register) != 1):
+                logger.info("UploadActivity not processed: register = " + str(register))
+                # existingUser = User.AuthByService(serviceRecord)
+                # # only log us in as this different user in the case that we don't already have an account
+                # if existingUser is not None:
+                #     User.Login(existingUser, req)
+                return
+
         if self.LastUpload is not None:
             while (datetime.now() - self.LastUpload).total_seconds() < 5:
                 time.sleep(1)
