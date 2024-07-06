@@ -1,35 +1,103 @@
 version: "3"
 services:
   tapiriik:
-    build: .
+    image: tapiriik
+    command: /bin/sh -c 'python3 manage.py runserver 0.0.0.0:8000'
+    restart: always
     volumes:
       - ./:/app:rw
       - tapiriik_data:/wamp/www/tapiriik/tapiriik/static:rw
+      - tapiriik_session_data:/sessions:rw
+      - tapiriik_user_logs:/var/log/tapiriik/user/:rw
       # - ./tapiriik/local_settings.py:/app/local_settings.py:rw
     environment:
       - RABBITMQ_BROKER_URL=amqp://guest@tapiriik_rabbitmq//
       - MONGO_HOST=mongodb://root:example@tapiriik_mongo:27017/admin
       - REDIS_HOST=tapiriik_redis
     ports:
-      - "8087:8000"
-    links:
-      - tapiriik_redis
-      - tapiriik_mongo
-      - tapiriik_rabbitmq
+      - "127.0.0.1:8087:8000"
+    depends_on:
+      tapiriik_redis:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_mongo:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_rabbitmq:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_scheduler:
+        condition: service_started
+  tapiriik_scheduler:
+    image: tapiriik
+    command: /bin/sh -c 'python3 sync_scheduler.py'
+    restart: always
+    volumes:
+      - ./:/app:r
+      - tapiriik_user_logs:/var/log/tapiriik/user/:rw
+    environment:
+      - RABBITMQ_BROKER_URL=amqp://guest@tapiriik_rabbitmq//
+      - MONGO_HOST=mongodb://root:example@tapiriik_mongo:27017/admin
+      - REDIS_HOST=tapiriik_redis
+    depends_on:
+      tapiriik_redis:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_mongo:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_rabbitmq:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_worker:
+        condition: service_started
+  tapiriik_worker:
+    build: .
+    image: tapiriik
+    command: /bin/sh -c 'cp tapiriik/local_settings.py.example tapiriik/local_settings.py && cp /credentials_generated tapiriik/credentials_generated.py && python3 sync_worker.py'
+    restart: always
+    volumes:
+      - ./:/app:rw
+      - tapiriik_user_logs:/var/log/tapiriik/user/:rw
+    environment:
+      - RABBITMQ_BROKER_URL=amqp://guest@tapiriik_rabbitmq//
+      - MONGO_HOST=mongodb://root:example@tapiriik_mongo:27017/admin
+      - REDIS_HOST=tapiriik_redis
+    depends_on:
+      tapiriik_redis:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_mongo:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
+      tapiriik_rabbitmq:
+        condition: service_healthy # @see https://devops.stackexchange.com/a/16449/45477
   tapiriik_redis:
     image: redis
+    restart: always
+    healthcheck: # @see https://stackoverflow.com/a/71504657/4256005
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
   tapiriik_mongo:
     image: mongo:5.0.25-focal
+    restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: example
     volumes:
       - mongo_data:/data/db:rw
+    healthcheck: # @see https://stackoverflow.com/a/73783213/4256005
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
   tapiriik_rabbitmq:
     image: rabbitmq:3-management
+    restart: always
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq:rw
+    healthcheck: # @see https://devops.stackexchange.com/a/16449/45477
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 10s
+      timeout: 10s
+      retries: 5
 volumes:
   rabbitmq_data:
   mongo_data:
   tapiriik_data:
+  tapiriik_session_data:
+  tapiriik_user_logs:

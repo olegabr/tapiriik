@@ -126,6 +126,7 @@ class Sync:
 
         Sync._consumer.consume()
 
+        # for _ in kombu.eventloop(mq, limit=max_users, timeout=1, ignore_timeouts=True):
         for _ in kombu.eventloop(mq, limit=max_users):
             pass
 
@@ -845,6 +846,8 @@ class SynchronizationTask:
             else:
                 act = workingCopy
                 act.SourceConnection = dlSvcRecord
+                logger.debug('StartTime = ' + str(act.StartTime) + '; EndTime = ' + str(act.EndTime) + '; TZ = ' + str(act.TZ) + '; FallbackTZ = ' + str(act.FallbackTZ))
+                # logger.debug(str(act.Laps))
                 break  # succesfully got the activity + passed sanity checks, can stop now
         # If nothing was downloaded at this point, the activity record will show the most recent error - which is fine enough, since only one service is needed to get the activity.
         return act, dlSvc

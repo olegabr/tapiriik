@@ -4,8 +4,9 @@ from tapiriik.services.service_record import ServiceRecord
 from tapiriik.database import cachedb, db
 from tapiriik.services.interchange import UploadedActivity, ActivityType, ActivityStatistic, ActivityStatisticUnit, Waypoint, WaypointType, Location, Lap
 from tapiriik.services.api import APIException, UserException, UserExceptionType, APIExcludeActivity
+from tapiriik.services.gpx import GPXIO
 from tapiriik.services.fit import FITIO
-from tapiriik.auth import User
+# from tapiriik.auth import User
 
 from django.core.urlresolvers import reverse
 from datetime import datetime, timedelta
@@ -27,6 +28,7 @@ class VTrekeService(ServiceBase):
     DisplayName = "VTreke"
     DisplayAbbreviation = "VT"
     AuthenticationType = ServiceAuthenticationType.UsernamePassword
+    RequiresExtendedAuthorizationDetails = True
     UserProfileURL = "https://vtreke.ru/profile/{0}"
     UserActivityURL = "https://vtreke.ru/?status/{1}"
     API_URL = "https://vtreke.ru/wp-json/peepso/v1/activity_upload"
@@ -42,23 +44,25 @@ class VTrekeService(ServiceBase):
 
     # For mapping common->VTreke; no ambiguity in VTreke activity type
     _activityTypeMappings = {
-        ActivityType.Cycling: "Ride",
-        ActivityType.MountainBiking: "Ride",
-        ActivityType.Hiking: "Hike",
-        ActivityType.Running: "Run",
-        ActivityType.Walking: "Walk",
-        ActivityType.Snowboarding: "Snowboard",
-        ActivityType.Skating: "IceSkate",
-        ActivityType.CrossCountrySkiing: "NordicSki",
-        ActivityType.DownhillSkiing: "AlpineSki",
-        ActivityType.Swimming: "Swim",
-        ActivityType.Gym: "Workout",
-        ActivityType.Rowing: "Rowing",
-        ActivityType.Elliptical: "Elliptical",
-        ActivityType.RollerSkiing: "RollerSki",
-        ActivityType.StrengthTraining: "WeightTraining",
-        ActivityType.Climbing: "RockClimbing",
-        ActivityType.StandUpPaddling: "StandUpPaddling",
+        ActivityType.Cycling: "BICYCLING",
+        ActivityType.MountainBiking: "BICYCLING", # TODO: add to vtreke
+        ActivityType.Hiking: "HIKING",
+        ActivityType.Running: "RUNNING",
+        ActivityType.Walking: "WALKING",
+        ActivityType.Snowboarding: "SNOWBOARD",
+        ActivityType.Skating: "SKATES",
+        ActivityType.CrossCountrySkiing: "CROSS_COUNTRY_SKIING",
+        ActivityType.DownhillSkiing: "SKIING", # TODO: add to vtreke
+        ActivityType.Swimming: "SWIM",
+        ActivityType.Gym: "WORKOUT",
+        ActivityType.Rowing: "ROWING",
+        ActivityType.Elliptical: "WALKING", # TODO: add to vtreke
+        ActivityType.RollerSkiing: "SKIING", # TODO: add to vtreke
+        ActivityType.StrengthTraining: "WORKOUT", # TODO: add to vtreke
+        ActivityType.Climbing: "ROCK_CLIMBING",
+        ActivityType.StandUpPaddling: "ROWING", # TODO: add to vtreke
+        # TODO: add all garmin activiries
+        # @see https://help.validic.com/space/VCS/1681490020/Garmin+%5BInform%5D
     }
 
     # For mapping VTreke->common
@@ -164,15 +168,14 @@ class VTrekeService(ServiceBase):
         serviceRecord.SetPartialSyncTriggerSubscriptionState(False)
 
     def ExternalIDsForPartialSyncTrigger(self, req):
-        data = json.loads(req.body.decode("UTF-8"))
-        return [(data["owner_id"], None)]
+        return [(req.POST["user_id"], None)]
 
     def PartialSyncTriggerGET(self, req):
         # VTreke requires this endpoint to echo back a challenge.
         # Only happens once during manual endpoint setup?
         from django.http import HttpResponse
         return HttpResponse(json.dumps({
-            "hub.challenge": req.GET["hub.challenge"]
+            # "hub.challenge": req.GET["hub.challenge"]
         }))
 
     def DownloadActivity(self, svcRecord, activity):
@@ -186,7 +189,7 @@ class VTrekeService(ServiceBase):
             from tapiriik.auth.credential_storage import CredentialStore
             register = CredentialStore.Decrypt(extendedAuthorization["Password"])
             logger.debug("Activity register = " + str(register))
-            if (str(register) != 1):
+            if (str(register) != "1"):
                 logger.info("UploadActivity not processed: register = " + str(register))
                 # existingUser = User.AuthByService(serviceRecord)
                 # # only log us in as this different user in the case that we don't already have an account
@@ -211,20 +214,23 @@ class VTrekeService(ServiceBase):
                 logger.info("Activity wp_user_id = " + str(wp_user_id))
 
             req = {
-                    "data_type": "fit",
+                    "data_type": "gpx",
                     "activity_name": activity.Name,
                     "description": activity.Notes, # Paul Mach said so.
                     "activity_type": self._activityTypeMappings[activity.Type],
                     "private": 1 if activity.Private else 0,
+                    # @see https://stackoverflow.com/a/79877/4256005
+                    "starttime": activity.StartTime.astimezone(pytz.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "endtime": activity.EndTime.astimezone(pytz.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     "user_id": wp_user_id}
 
-            if "fit" in activity.PrerenderedFormats:
-                logger.debug("Using prerendered FIT")
-                fitData = activity.PrerenderedFormats["fit"]
+            if "gpx" in activity.PrerenderedFormats:
+                logger.debug("Using prerendered GPX")
+                gpxData = activity.PrerenderedFormats["gpx"]
             else:
-                # TODO: put the fit back into PrerenderedFormats once there's more RAM to go around and there's a possibility of it actually being used.
-                fitData = FITIO.Dump(activity, drop_pauses=True)
-            files = {"file":("tap-sync-" + activity.UID + "-" + str(os.getpid()) + ("-" + source_svc if source_svc else "") + ".fit", fitData)}
+                # TODO: put the gpx back into PrerenderedFormats once there's more RAM to go around and there's a possibility of it actually being used.
+                gpxData = GPXIO.Dump(activity)
+            files = {"file":("tap-sync-" + activity.UID + "-" + str(os.getpid()) + ("-" + source_svc if source_svc else "") + ".gpx", gpxData)}
 
             response = self._requestWithAuth(lambda session: session.post(self.API_URL, data=req, files=files), serviceRecord)
             if response.status_code != 201:

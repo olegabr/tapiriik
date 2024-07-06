@@ -32,6 +32,13 @@ from garth.exc import GarthException
 from garth.auth_tokens import OAuth1Token, OAuth2Token
 from garth.utils import asdict
 
+# @see https://thegarth.s3.amazonaws.com/oauth_consumer.json
+import garth.sso
+garth.sso.OAUTH_CONSUMER = {
+  "consumer_key": "fc3e99d2-118c-44b8-8ae3-03370dde24c0",
+  "consumer_secret": "E08WAR897WEy2knn7aFBrvegVAf0AFdWBBF"
+}
+
 class GarminConnectService(ServiceBase):
     ID = "garminconnect"
     DisplayName = "Garmin Connect"
@@ -47,6 +54,7 @@ class GarminConnectService(ServiceBase):
     DownloadRetryCount = 6
 
     ConfigurationDefaults = {
+        "sync_private": True,
         "WatchUserKey": None,
         "WatchUserLastID": 0
     }
@@ -59,10 +67,14 @@ class GarminConnectService(ServiceBase):
                                 "hiking": ActivityType.Hiking,
                                 "resort_skiing_snowboarding": ActivityType.DownhillSkiing,
                                 "cross_country_skiing": ActivityType.CrossCountrySkiing,
+                                # @see https://help.validic.com/space/VCS/1681490020/Garmin+%5BInform%5D
+                                # TODO: support all garmin activity types
+                                "cross_country_skiing_ws": ActivityType.CrossCountrySkiing,
                                 "skate_skiing": ActivityType.CrossCountrySkiing, # Well, it ain't downhill?
                                 "backcountry_skiing_snowboarding": ActivityType.CrossCountrySkiing,  # ish
                                 "skating": ActivityType.Skating,
                                 "swimming": ActivityType.Swimming,
+                                "lap_swimming": ActivityType.Swimming,
                                 "rowing": ActivityType.Rowing,
                                 "elliptical": ActivityType.Elliptical,
                                 "fitness_equipment": ActivityType.Gym,
@@ -82,8 +94,10 @@ class GarminConnectService(ServiceBase):
                                 "hiking": ActivityType.Hiking,
                                 "resort_skiing_snowboarding": ActivityType.DownhillSkiing,
                                 "cross_country_skiing": ActivityType.CrossCountrySkiing,
+                                "cross_country_skiing_ws": ActivityType.CrossCountrySkiing,
                                 "skating": ActivityType.Skating,
                                 "swimming": ActivityType.Swimming,
+                                "lap_swimming": ActivityType.Swimming,
                                 "rowing": ActivityType.Rowing,
                                 "elliptical": ActivityType.Elliptical,
                                 "fitness_equipment": ActivityType.Gym,
@@ -196,17 +210,17 @@ class GarminConnectService(ServiceBase):
         return garth
 
     def _get_session_data(self):
-        if not garth.oauth1_token:
+        if not garth.client.oauth1_token:
             return None
-        if not garth.oauth2_token:
+        if not garth.client.oauth2_token:
             return None
-        return [json.dumps(asdict(garth.oauth1_token)), json.dumps(asdict(garth.oauth2_token))]
+        return [json.dumps(asdict(garth.client.oauth1_token)), json.dumps(asdict(garth.client.oauth2_token))]
 
     def _get_session(self, record=None, email=None, password=None, skip_cache=False):
         from tapiriik.auth.credential_storage import CredentialStore
         cached = self._sessionCache.Get(record.ExternalID if record else email)
         if cached and not skip_cache:
-                logger.debug("Using cached credential")
+                # logger.debug("Using cached credential: " + str(cached[0]) + ", " + str(cached[1]))
                 return self._load_session_data(cached[0], cached[1])
         if record:
             #  longing for C style overloads...
@@ -216,10 +230,26 @@ class GarminConnectService(ServiceBase):
         session = None
         try:
             garth.client.username
+            logger.debug("Already logged")
+            session = self._get_session_data()
+        except AssertionError as e:
+            logger.debug("failed to check for active session: %s" % str(e))
+            try:
+                logger.debug("try to login: %s %s" % (email, password))
+                garth.login(email, password)
+                session = self._get_session_data()
+            except GarthException as e:
+                # Login failed
+                logger.debug("failed to login: %s" % e.msg)
         except GarthException:
             # Session is expired. You'll need to log in again
-            garth.login(email, password)
-            session = self._get_session_data()
+            try:
+                logger.debug("try to login: %s %s" % (email, password))
+                garth.login(email, password)
+                session = self._get_session_data()
+            except GarthException as e:
+                # Login failed
+                logger.debug("failed to login: %s" % e.msg)
 
         if not session:
             return None
@@ -329,7 +359,8 @@ class GarminConnectService(ServiceBase):
     def _resolveActivityType(self, act_type):
         logger.debug(act_type)
         if act_type not in self._activityMappings:
-            raise ValueError("Activity type not found in activity hierarchy")
+            return ActivityType.Other
+            # raise ValueError("Activity type not found in activity hierarchy")
         # Mostly there are two levels of a hierarchy, so we don't really need this as the parent is included in the listing.
         # But maybe they'll change that some day?
         # while act_type not in self._activityMappings:
@@ -349,7 +380,7 @@ class GarminConnectService(ServiceBase):
         while True:
             logger.debug("Req with " + str({"start": (page - 1) * pageSz, "limit": pageSz}))
 
-            res = self._request_with_reauth(lambda session: session.connectapi("/activitylist-service/activities/search/activities", params={"start": (page - 1) * pageSz, "limit": pageSz}), serviceRecord, force_skip_cache=force_reauth)
+            res = self._request_with_reauth(lambda session: session.client.request("GET", "connectapi", "/activitylist-service/activities/search/activities", params={"start": (page - 1) * pageSz, "limit": pageSz}, api=True), serviceRecord, force_skip_cache=force_reauth)
             force_reauth = False
 
             try:
@@ -365,7 +396,7 @@ class GarminConnectService(ServiceBase):
 
                 activity = UploadedActivity()
                 # stationary activities have movingDuration = None while non-gps static activities have 0.0
-                activity.Stationary = act["movingDuration"] is None
+                activity.Stationary = "movingDuration" not in act or act["movingDuration"] is None
                 activity.GPS = act["hasPolyline"]
 
                 activity.Private = act["privacy"]["typeKey"] == "private"
@@ -375,17 +406,17 @@ class GarminConnectService(ServiceBase):
                 if activity_name is not None and len(activity_name.strip()) and activity_name != "Untitled": # This doesn't work for internationalized accounts, oh well.
                     activity.Name = activity_name
 
-                activity_description = act["description"]
-                if activity_description is not None and len(activity_description.strip()):
-                    activity.Notes = activity_description
+                # activity_description = act["description"]
+                # if activity_description is not None and len(activity_description.strip()):
+                #     activity.Notes = activity_description
 
                 activity.StartTime = pytz.utc.localize(datetime.strptime(act["startTimeGMT"], "%Y-%m-%d %H:%M:%S"))
                 if act["elapsedDuration"] is not None:
-                    activity.EndTime = activity.StartTime + timedelta(0, float(act["elapsedDuration"])/1000)
+                    activity.EndTime = activity.StartTime + timedelta(0, float(act["elapsedDuration"]))
                 else:
                     activity.EndTime = activity.StartTime + timedelta(0, float(act["duration"]))
 
-                logger.debug("Activity s/t " + str(activity.StartTime) + " on page " + str(page))
+                logger.debug("Activity s/t " + str(activity.StartTime) + "; e/t " + str(activity.EndTime) + "; startTimeGMT = " + str(act["startTimeGMT"]) + "; elapsedDuration = " + str(act["elapsedDuration"]) + "; duration = " + str(act["duration"]) + " on page " + str(page))
 
                 if "distance" in act and act["distance"] and float(act["distance"]) != 0:
                     activity.Stats.Distance = ActivityStatistic(ActivityStatisticUnit.Meters, value=float(act["distance"]))
@@ -412,10 +443,11 @@ class GarminConnectService(ServiceBase):
     def _downloadActivitySummary(self, serviceRecord, activity):
         activityID = activity.ServiceData["ActivityID"]
 
-        summary_resp = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/" + str(activityID)), serviceRecord)
+        summary_resp = self._request_with_reauth(lambda session: session.client.request("GET", "connectapi", "/activity-service/activity/" + str(activityID), api=True), serviceRecord)
 
         try:
             summary_data = summary_resp.json()
+            # logger.debug('_downloadActivitySummary: ' + str(summary_data))
         except ValueError:
             raise APIException("Failure downloading activity summary %s:%s" % (summary_resp.status_code, summary_resp.text))
         stat_map = {}
@@ -453,16 +485,32 @@ class GarminConnectService(ServiceBase):
 
         applyStats(summary_data["summaryDTO"], activity.Stats)
 
-        laps_resp = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/%s/splits" % str(activityID)), serviceRecord)
+        if "timeZoneUnitDTO" in summary_data:
+            try:
+                activity.TZ = pytz.timezone(summary_data["timeZoneUnitDTO"]["timeZone"])
+                # activity.StartTime = activity.TZ.localize(activity.StartTime)
+                activity.StartTime = datetime.combine(activity.StartTime.date(), activity.StartTime.time(), activity.TZ)
+                # activity.EndTime = activity.TZ.localize(activity.EndTime)
+                activity.EndTime = datetime.combine(activity.EndTime.date(), activity.EndTime.time(), activity.TZ)
+            except pytz.exceptions.UnknownTimeZoneError:
+                activity.TZ = None
+                logger.error('_downloadActivitySummary: UnknownTimeZoneError: ' + str(summary_data["timeZoneUnitDTO"]["timeZone"]))
+
+        laps_resp = self._request_with_reauth(lambda session: session.client.request("GET", "connectapi", "/activity-service/activity/%s/splits" % str(activityID), api=True), serviceRecord)
         try:
             laps_data = laps_resp.json()
+            # logger.debug('_downloadActivitySummary: laps_data = ' + str(laps_data))
         except ValueError:
             raise APIException("Failure downloading activity laps summary %s:%s" % (laps_resp.status_code, laps_resp.text))
 
         for lap_data in laps_data["lapDTOs"]:
             lap = Lap()
             if "startTimeGMT" in lap_data:
-                lap.StartTime = pytz.utc.localize(datetime.strptime(lap_data["startTimeGMT"], "%Y-%m-%dT%H:%M:%S.0"))
+                # tz = activity.TZ if activity.TZ is not None else pytz.utc
+                # lap.StartTime = tz.localize(datetime.strptime(lap_data["startTimeGMT"], "%Y-%m-%dT%H:%M:%S.0"))
+                lap.StartTime = datetime.strptime(lap_data["startTimeGMT"], "%Y-%m-%dT%H:%M:%S.0")
+                if activity.TZ is not None:
+                    lap.StartTime = datetime.combine(lap.StartTime.date(), lap.StartTime.time(), activity.TZ)
 
             elapsed_duration = None
             if "elapsedDuration" in lap_data:
@@ -473,8 +521,12 @@ class GarminConnectService(ServiceBase):
             if lap.StartTime and elapsed_duration:
                 # Always recalculate end time based on duration, if we have the start time
                 lap.EndTime = lap.StartTime + elapsed_duration
+                if activity.TZ is not None:
+                    lap.EndTime = datetime.combine(lap.EndTime.date(), lap.EndTime.time(), activity.TZ)
             if not lap.StartTime and lap.EndTime and elapsed_duration:
                 # Sometimes calculate start time based on duration
+                if activity.TZ is not None:
+                    lap.EndTime = datetime.combine(lap.EndTime.date(), lap.EndTime.time(), activity.TZ)
                 lap.StartTime = lap.EndTime - elapsed_duration
 
             if not lap.StartTime or not lap.EndTime:
@@ -501,9 +553,10 @@ class GarminConnectService(ServiceBase):
 
         # https://connect.garmin.com/modern/proxy/activity-service/activity/###/details
         activityID = activity.ServiceData["ActivityID"]
-        res = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/{}/details?maxSize=999999999".format(activityID)), serviceRecord)
+        res = self._request_with_reauth(lambda session: session.client.request("GET", "connectapi", "/activity-service/activity/{}/details?maxSize=999999999".format(activityID), api=True), serviceRecord)
         try:
             raw_data = res.json()
+            # logger.debug('DownloadActivity: ' + str(raw_data))
         except ValueError:
             raise APIException("Activity data parse error for %s: %s" % (res.status_code, res.text))
 
@@ -558,7 +611,9 @@ class GarminConnectService(ServiceBase):
 
                 # Handle units
                 if attr["is_timestamp"]:
-                    value = pytz.utc.localize(datetime.utcfromtimestamp(value / 1000))
+                    # value = pytz.utc.localize(datetime.utcfromtimestamp(value / 1000))
+                    dtvalue = datetime.utcfromtimestamp(value / 1000)
+                    value = datetime.combine(dtvalue.date(), dtvalue.time(), activity.TZ)
                 elif attr["to_units"]:
                     value = ActivityStatistic.convertValue(value, attr["from_units"], attr["to_units"])
 
@@ -587,8 +642,7 @@ class GarminConnectService(ServiceBase):
         files = {"data": ("tap-sync-" + str(os.getpid()) + "-" + activity.UID + ".fit", fit_file)}
 
         res = self._request_with_reauth(
-            lambda session: session.connectapi("/upload-service/upload/.fit",
-                                         method="POST",
+            lambda session: session.client.request("POST", "connectapi", "/upload-service/upload/.fit", api=True,
                                          files=files,
                                          headers={"nk": "NT"}),
             serviceRecord)
@@ -632,7 +686,7 @@ class GarminConnectService(ServiceBase):
         if metadata_object:
             metadata_object["activityId"] = actid
             encoding_headers = {"Content-Type": "application/json; charset=UTF-8"} # GC really, really needs this part, otherwise it throws obscure errors like "Invalid signature for signature method HMAC-SHA1"
-            res = self._request_with_reauth(lambda session: session.connectapi("/activity-service/activity/" + str(actid), data=json.dumps(metadata_object), headers=encoding_headers, method="PUT"), serviceRecord)
+            res = self._request_with_reauth(lambda session: session.client.request("PUT", "connectapi", "/activity-service/activity/" + str(actid), data=json.dumps(metadata_object), headers=encoding_headers, api=True), serviceRecord)
             if res.status_code != 204:
                 raise APIWarning("Unable to set activity metadata - %d %s" % (res.status_code, res.text))
 
@@ -657,7 +711,7 @@ class GarminConnectService(ServiceBase):
         if not session:
             logger.info("SubscribeToPartialSyncTrigger failed for %s" % user_name)
             return None
-        resp = session.connectapi("/userprofile-service/connection/request/%s" % user_name, method="PUT")
+        resp = session.client.request("PUT", "connectapi", "/userprofile-service/connection/request/%s" % user_name, api=True)
         try:
             assert resp.status_code == 200
             assert resp.json()["requestStatus"] == "Created"
@@ -680,7 +734,7 @@ class GarminConnectService(ServiceBase):
             return None
         if "WatchConnectionID" in serviceRecord.GetConfiguration():
             self._rate_limit()
-            dc_resp = session.connectapi("/userprofile-service/connection/end/%s" % serviceRecord.GetConfiguration()["WatchConnectionID"], method="PUT")
+            dc_resp = session.client.request("PUT", "connectapi", "/userprofile-service/connection/end/%s" % serviceRecord.GetConfiguration()["WatchConnectionID"], api=True)
             if dc_resp.status_code != 200:
                 raise APIException("Error disconnecting user watch accunt %s from %s: %s %s" % (active_watch_user, serviceRecord.ExternalID, dc_resp.status_code, dc_resp.text))
 
@@ -723,8 +777,8 @@ class GarminConnectService(ServiceBase):
             for x in range(SERVER_ERROR_RETRIES):
                 logger.debug("Fetching activity list from %d - attempt %d", i, x)
                 watch_activities_resp = self._request_with_reauth(
-                    lambda session: session.connectapi("/activitylist-service/activities/subscriptionFeed",
-                                                params={"limit": PAGE_SIZE, "start": i}),
+                    lambda session: session.client.request("GET", "connectapi", "/activitylist-service/activities/subscriptionFeed",
+                                                params={"limit": PAGE_SIZE, "start": i}, api=True),
                     **sess_args)
                 if watch_activities_resp.status_code != 500:
                     break
@@ -754,7 +808,7 @@ class GarminConnectService(ServiceBase):
             self._rate_limit()
             logger.debug("Fetching connection request list - attempt %d", x)
             pending_connections_resp = self._request_with_reauth(
-                lambda session: session.connectapi("/userprofile-service/connection/pending"),
+                lambda session: session.client.request("GET", "connectapi", "/userprofile-service/connection/pending", api=True),
                 **sess_args)
             if pending_connections_resp.status_code != 500:
                 break
@@ -769,14 +823,14 @@ class GarminConnectService(ServiceBase):
                 if pending_connect["displayName"] in valid_pending_connections_external_ids:
                     self._rate_limit()
                     connect_resp = self._request_with_reauth(
-                        lambda session: session.connectapi("/userprofile-service/connection/accept/%s" % pending_connect["connectionRequestId"], method="PUT"),
+                        lambda session: session.client.request("PUT", "connectapi", "/userprofile-service/connection/accept/%s" % pending_connect["connectionRequestId"], api=True),
                         **sess_args)
                     if connect_resp.status_code != 200:
                         logger.error("Error accepting request on watch account %s: %s %s" % (watch_user["Name"], connect_resp.status_code, connect_resp.text))
                 else:
                     self._rate_limit()
                     self._request_with_reauth(
-                        lambda session: session.connectapi("/userprofile-service/connection/decline/%s" % pending_connect["connectionRequestId"], method="PUT"),
+                        lambda session: session.client.request("PUT", "connectapi", "/userprofile-service/connection/decline/%s" % pending_connect["connectionRequestId"], api=True),
                         **sess_args)
 
         return to_sync_ids
@@ -796,5 +850,5 @@ class GarminConnectService(ServiceBase):
             logger.info("DeleteActivity failed for %s" % active_watch_user["Username"])
             return None
         self._rate_limit()
-        del_res = session.connectapi("/activity-service/activity/%d" % uploadId, method="DELETE")
+        del_res = session.client.request("DELETE", "connectapi", "/activity-service/activity/%d" % uploadId, api=True)
         del_res.raise_for_status()

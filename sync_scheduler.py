@@ -5,10 +5,13 @@ from pymongo.read_preferences import ReadPreference
 import kombu
 import time
 import uuid
+import logging
 
 Sync.InitializeWorkerBindings()
 
 producer = kombu.Producer(Sync._channel, Sync._exchange)
+
+logger = logging.getLogger(__name__)
 
 while True:
     generation = str(uuid.uuid4())
@@ -24,11 +27,13 @@ while True:
                 }
             ))
     scheduled_ids = [x["_id"] for x in users]
-    print("Found %d users at %s" % (len(scheduled_ids), datetime.utcnow()))
-    db.users.update({"_id": {"$in": scheduled_ids}}, {"$set": {"QueuedAt": queueing_at, "QueuedGeneration": generation}, "$unset": {"NextSynchronization": True}}, multi=True)
-    print("Marked %d users as queued at %s" % (len(scheduled_ids), datetime.utcnow()))
-    for user in users:
-        producer.publish({"user_id": str(user["_id"]), "generation": generation}, routing_key=user["SynchronizationHostRestriction"] if "SynchronizationHostRestriction" in user and user["SynchronizationHostRestriction"] else "")
-    print("Scheduled %d users at %s" % (len(scheduled_ids), datetime.utcnow()))
+    scheduled_ids_len = len(scheduled_ids)
+    if scheduled_ids_len > 0:
+        logger.info("Found %d users at %s" % (len(scheduled_ids), datetime.utcnow()))
+        db.users.update({"_id": {"$in": scheduled_ids}}, {"$set": {"QueuedAt": queueing_at, "QueuedGeneration": generation}, "$unset": {"NextSynchronization": True}}, multi=True)
+        logger.info("Marked %d users as queued at %s" % (len(scheduled_ids), datetime.utcnow()))
+        for user in users:
+            producer.publish({"user_id": str(user["_id"]), "generation": generation}, routing_key=user["SynchronizationHostRestriction"] if "SynchronizationHostRestriction" in user and user["SynchronizationHostRestriction"] else "")
+        logger.info("Scheduled %d users at %s" % (len(scheduled_ids), datetime.utcnow()))
 
     time.sleep(1)

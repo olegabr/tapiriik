@@ -9,6 +9,9 @@ from pymongo.read_preferences import ReadPreference
 from bson.objectid import ObjectId
 
 import copy
+import logging
+
+logger = logging.getLogger(__name__)
 
 class User:
     ConfigurationDefaults = {
@@ -23,17 +26,21 @@ class User:
         return db.users.find_one({"ConnectedServices.ID": svcRec._id})
 
     def Ensure(req):
-        from ipware.ip import get_real_ip
+        from ipware import get_client_ip
         if req.user == None:
-            req.user = User.Create(creationIP=get_real_ip(req))
+            req.user = User.Create(creationIP=get_client_ip(req))
             User.Login(req.user, req)
         return req.user
 
     def Login(user, req):
         req.session["userid"] = str(user["_id"])
+        userId = req.session.get("userid")
+        logger.debug("Login: userId = " + str(userId))
         req.user = user
 
     def Logout(req):
+        userId = req.session.get("userid")
+        logger.debug("Logout: userId = " + str(userId))
         del req.session["userid"]
         del req.user
 
@@ -251,6 +258,7 @@ class DiagnosticsUser:
 class SessionAuth:
     def process_request(self, req):
         userId = req.session.get("userid")
+        logger.debug("SessionAuth: userId = " + str(userId))
         isSU = False
         if req.session.get("substituteUserid") is not None or ("su" in req.GET and DiagnosticsUser.IsAuthenticated(req)):
             userId = req.GET["su"] if "su" in req.GET else req.session.get("substituteUserid")

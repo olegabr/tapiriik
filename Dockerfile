@@ -32,14 +32,18 @@ RUN python3 /credentialstore_keygen.py >> /credentials_generated && rm /credenti
 # RUN cp tapiriik/local_settings.py.example tapiriik/local_settings.py && \
 #   python3 credentialstore_keygen.py >> tapiriik/local_settings.py
 
+RUN mkdir /app && \
+  git config --global --add safe.directory /app
+
 WORKDIR /app
 
 # RUN rm -rf /app_src
 
 # run server, worker and scheduler
-ENTRYPOINT git config --global --add safe.directory /app && \
-  cp tapiriik/local_settings.py.example tapiriik/local_settings.py && \
-  cat /credentials_generated >> tapiriik/local_settings.py && \
-  python3 manage.py runserver 0.0.0.0:8000 && \
-  python3 sync_worker.py && \
-  python3 sync_scheduler.py
+# ENTRYPOINT echo "start sync_worker" && \
+#   python3 sync_worker.py & \
+#   echo "start sync_scheduler" && \
+#   python3 sync_scheduler.py & \
+#   echo "start django server" && \
+#   python3 manage.py runserver 0.0.0.0:8000
+  

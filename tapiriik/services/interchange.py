@@ -184,7 +184,8 @@ class Activity:
                 raise ValueError("Exactly 0 waypoints")
             if wptCt == 1:
                 raise ValueError("Only 1 waypoint")
-        if self.Stats.Distance.Value is not None and self.Stats.Distance.asUnits(ActivityStatisticUnit.Meters).Value > 1000 * 1000:
+        # 100000 km
+        if self.Stats.Distance.Value is not None and self.Stats.Distance.asUnits(ActivityStatisticUnit.Meters).Value > 100000 * 1000:
             raise ValueError("Exceedingly long activity (distance)")
         if self.StartTime.replace(tzinfo=None) > (datetime.now() + timedelta(days=5)):
             raise ValueError("Activity is from the future")
@@ -237,40 +238,47 @@ class Activity:
 
     # Gets called a bit later than CheckSanity, meh
     def CheckTimestampSanity(self):
-        out_of_bounds_leeway = timedelta(minutes=10)
+        out_of_bounds_leeway = timedelta(minutes=120)
 
-        if self.StartTime.tzinfo != self.TZ:
+        tm = datetime.now()
+        selfTZOffset = self.TZ.utcoffset(tm).seconds
+        StartTimeTZOffset = self.StartTime.tzinfo.utcoffset(tm).seconds
+        if StartTimeTZOffset != selfTZOffset:
             raise ValueError("Activity StartTime TZ mismatch - %s master vs %s instance" % (self.TZ, self.StartTime.tzinfo))
-        if self.EndTime.tzinfo != self.TZ:
+        EndTimeTZOffset = self.EndTime.tzinfo.utcoffset(tm).seconds
+        if EndTimeTZOffset != selfTZOffset:
             raise ValueError("Activity EndTime TZ mismatch - %s master vs %s instance" % (self.TZ, self.EndTime.tzinfo))
 
         for lap in self.Laps:
-            if lap.StartTime.tzinfo != self.TZ:
+            lapStartTimeTZOffset = lap.StartTime.tzinfo.utcoffset(tm).seconds
+            if lapStartTimeTZOffset != selfTZOffset:
                 raise ValueError("Lap StartTime TZ mismatch - %s master vs %s instance" % (self.TZ, lap.StartTime.tzinfo))
-            if lap.EndTime.tzinfo != self.TZ:
+            lapEndTimeTZOffset = lap.EndTime.tzinfo.utcoffset(tm).seconds
+            if lapEndTimeTZOffset != selfTZOffset:
                 raise ValueError("Lap EndTime TZ mismatch - %s master vs %s instance" % (self.TZ, lap.EndTime.tzinfo))
 
             for wp in lap.Waypoints:
-                if wp.Timestamp.tzinfo != self.TZ:
+                wpTimestampTZOffset = wp.Timestamp.tzinfo.utcoffset(tm).seconds
+                if wpTimestampTZOffset != selfTZOffset:
                     raise ValueError("Waypoint TZ mismatch - %s master vs %s instance" % (self.TZ, wp.Timestamp.tzinfo))
 
                 if lap.StartTime - wp.Timestamp > out_of_bounds_leeway:
-                    raise ValueError("Waypoint occurs too far before lap")
+                    raise ValueError("Waypoint occurs too far before lap: " + str(lap.StartTime) + " > " + str(wp.Timestamp))
 
                 if wp.Timestamp - lap.EndTime > out_of_bounds_leeway:
-                    raise ValueError("Waypoint occurs too far after lap")
+                    raise ValueError("Waypoint occurs too far after lap: " + str(wp.Timestamp) + " > " + str(lap.EndTime))
 
                 if self.StartTime - wp.Timestamp > out_of_bounds_leeway:
-                    raise ValueError("Waypoint occurs too far before activity")
+                    raise ValueError("Waypoint occurs too far before activity: " + str(self.StartTime) + " > " + str(wp.Timestamp))
 
                 if wp.Timestamp - self.EndTime > out_of_bounds_leeway:
-                    raise ValueError("Waypoint occurs too far after activity")
+                    raise ValueError("Waypoint occurs too far after activity: " + str(wp.Timestamp) + " > " + str(self.EndTime))
 
             if self.StartTime - lap.StartTime > out_of_bounds_leeway:
-                raise ValueError("Lap starts too far before activity")
+                raise ValueError("Lap starts too far before activity: " + str(self.StartTime) + " > " + str(lap.StartTime))
 
             if lap.EndTime - self.EndTime > out_of_bounds_leeway:
-                raise ValueError("Lap ends too far after activity")
+                raise ValueError("Lap ends too far after activity: " + str(lap.EndTime) + " > " + str(self.EndTime))
 
     def CleanStats(self):
         """

@@ -11,6 +11,8 @@ from tapiriik.settings import MONGO_FULL_WRITE_CONCERN
 from datetime import datetime
 import zlib
 
+import logging
+logger = logging.getLogger(__name__)
 
 def sync_status(req):
     if not req.user:
@@ -103,6 +105,7 @@ def sync_clear_badactivitiesacknowledgement(req):
 @csrf_exempt
 def sync_trigger_partial_sync_callback(req, service):
     svc = Service.FromID(service)
+    logger.debug("sync_trigger_partial_sync_callback: req.method = " + str(req.method))
     if req.method == "POST":
         from sync_remote_triggers import trigger_remote
         affected_connection_external_ids = svc.ExternalIDsForPartialSyncTrigger(req)

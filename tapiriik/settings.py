@@ -130,7 +130,8 @@ MIDDLEWARE_CLASSES = (
     # 'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
 
-SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"  # file-based sessions on windows are terrible
+SESSION_ENGINE = "django.contrib.sessions.backends.file"  # file-based sessions on windows are terrible
+SESSION_FILE_PATH = "/sessions"
 
 ROOT_URLCONF = 'tapiriik.urls'
 
@@ -186,14 +187,14 @@ LOGGING = {
             'class': 'django.utils.log.AdminEmailHandler'
         },
         'console': {
-            'level': 'ERROR',
+            'level': 'DEBUG',
             'class': 'logging.StreamHandler'
         }
     },
     'loggers': {
         'django.request': {
             'handlers': ['mail_admins', 'console'],
-            'level': 'ERROR',
+            'level': 'DEBUG',
             'propagate': True,
         },
     }
@@ -248,7 +249,7 @@ REJECTED_SERVICES = []
 WITHDRAWN_SERVICES = []
 
 # Where to put per-user sync logs
-USER_SYNC_LOGS = "./"
+USER_SYNC_LOGS = "/var/log/tapiriik/user/"
 
 # Set at startup
 SITE_VER = "unknown"
@@ -277,3 +278,4 @@ RABBITMQ_USER_QUEUE_STATS_URL = "http://guest:guest@localhost:15672/api/queues/%
 GARMIN_CONNECT_USER_WATCH_ACCOUNTS = {}
 
 from .local_settings import *
+from .credentials_generated import *

@@ -42,7 +42,7 @@ LOGGING = {
 
 # This is where sync logs show up
 # It is the only directory that needs to be writable by the webapp user
-USER_SYNC_LOGS = "./"
+USER_SYNC_LOGS = "/var/log/tapiriik/user/"
 
 # How many total sync workers are expected to be running
 TOTAL_SYNC_WORKERS = 1
