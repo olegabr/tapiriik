@@ -236,7 +236,7 @@ class SynchronizationTask:
                     "SynchronizationWorker": None
                 }
             })
-        logger.debug("User unlock returned %s" % unlock_result)
+        # logger.debug("User unlock returned %s" % unlock_result)
 
     def _loadServiceData(self):
         self._connectedServiceIds = [x["ID"] for x in self.user["ConnectedServices"]]
@@ -708,7 +708,7 @@ class SynchronizationTask:
         # Attempt to assign fallback TZs to all stationary/potentially-stationary activities, since we may not be able to determine TZ any other way.
         fallbackTZ = self._estimateFallbackTZ(self._activities)
         if fallbackTZ:
-            logger.info("Setting fallback TZs to %s" % fallbackTZ )
+            # logger.info("Setting fallback TZs to %s" % fallbackTZ )
             for act in self._activities:
                 act.FallbackTZ = fallbackTZ
 
@@ -936,7 +936,7 @@ class SynchronizationTask:
 
                     self._primeExtendedAuthDetails(conn)
 
-                    logger.info("Ensuring partial sync poll subscription")
+                    # logger.info("Ensuring partial sync poll subscription")
                     self._ensurePartialSyncPollingSubscription(conn)
 
                     if not exhaustive and conn.Service.PartialSyncRequiresTrigger and "TriggerPartialSync" not in conn.__dict__ and not conn.Service.ShouldForcePartialSyncTrigger(conn):
@@ -964,8 +964,8 @@ class SynchronizationTask:
                 processedActivities = 0
 
                 for activity in self._activities:
-                    logger.info(str(activity) + " " + str(activity.UID[:3]) + " from " + str([[y.Service.ID for y in self._serviceConnections if y._id == x][0] for x in activity.ServiceDataCollection.keys()]))
-                    logger.info(" Name: %s Notes: %s Distance: %s%s" % (activity.Name[:15] if activity.Name else "", activity.Notes[:15] if activity.Notes else "", activity.Stats.Distance.Value, activity.Stats.Distance.Units))
+                    # logger.info(str(activity) + " " + str(activity.UID[:3]) + " from " + str([[y.Service.ID for y in self._serviceConnections if y._id == x][0] for x in activity.ServiceDataCollection.keys()]))
+                    # logger.info(" Name: %s Notes: %s Distance: %s%s" % (activity.Name[:15] if activity.Name else "", activity.Notes[:15] if activity.Notes else "", activity.Stats.Distance.Value, activity.Stats.Distance.Units))
                     try:
                         activity.Record = self._findOrCreateActivityRecord(activity) # Make it a member of the activity, to avoid passing it around as a seperate parameter everywhere.
 

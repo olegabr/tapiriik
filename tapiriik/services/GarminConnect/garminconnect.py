@@ -357,7 +357,7 @@ class GarminConnectService(ServiceBase):
         return "https://connect.garmin.com/modern/activity/%d" % uploadId
 
     def _resolveActivityType(self, act_type):
-        logger.debug(act_type)
+        # logger.debug(act_type)
         if act_type not in self._activityMappings:
             return ActivityType.Other
             # raise ValueError("Activity type not found in activity hierarchy")
@@ -378,7 +378,7 @@ class GarminConnectService(ServiceBase):
         exclusions = []
         force_reauth = False
         while True:
-            logger.debug("Req with " + str({"start": (page - 1) * pageSz, "limit": pageSz}))
+            # logger.debug("Req with " + str({"start": (page - 1) * pageSz, "limit": pageSz}))
 
             res = self._request_with_reauth(lambda session: session.client.request("GET", "connectapi", "/activitylist-service/activities/search/activities", params={"start": (page - 1) * pageSz, "limit": pageSz}, api=True), serviceRecord, force_skip_cache=force_reauth)
             force_reauth = False
@@ -402,7 +402,7 @@ class GarminConnectService(ServiceBase):
                 activity.Private = act["privacy"]["typeKey"] == "private"
 
                 activity_name = act["activityName"]
-                logger.debug("Name " + activity_name if activity_name is not None else "Untitled" + ":")
+                # logger.debug("Name " + activity_name if activity_name is not None else "Untitled" + ":")
                 if activity_name is not None and len(activity_name.strip()) and activity_name != "Untitled": # This doesn't work for internationalized accounts, oh well.
                     activity.Name = activity_name
 
@@ -416,7 +416,7 @@ class GarminConnectService(ServiceBase):
                 else:
                     activity.EndTime = activity.StartTime + timedelta(0, float(act["duration"]))
 
-                logger.debug("Activity s/t " + str(activity.StartTime) + "; e/t " + str(activity.EndTime) + "; startTimeGMT = " + str(act["startTimeGMT"]) + "; elapsedDuration = " + str(act["elapsedDuration"]) + "; duration = " + str(act["duration"]) + " on page " + str(page))
+                # logger.debug("Activity s/t " + str(activity.StartTime) + "; e/t " + str(activity.EndTime) + "; startTimeGMT = " + str(act["startTimeGMT"]) + "; elapsedDuration = " + str(act["elapsedDuration"]) + "; duration = " + str(act["duration"]) + " on page " + str(page))
 
                 if "distance" in act and act["distance"] and float(act["distance"]) != 0:
                     activity.Stats.Distance = ActivityStatistic(ActivityStatisticUnit.Meters, value=float(act["distance"]))
