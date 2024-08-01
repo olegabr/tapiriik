@@ -33,6 +33,7 @@ while True:
         db.users.update({"_id": {"$in": scheduled_ids}}, {"$set": {"QueuedAt": queueing_at, "QueuedGeneration": generation}, "$unset": {"NextSynchronization": True}}, multi=True)
         logger.info("Marked %d users as queued at %s" % (len(scheduled_ids), datetime.utcnow()))
         for user in users:
+            # logger.info("Set QueuedAt for user " + str(user["_id"]) + " and publish it to queue")
             producer.publish({"user_id": str(user["_id"]), "generation": generation}, routing_key=user["SynchronizationHostRestriction"] if "SynchronizationHostRestriction" in user and user["SynchronizationHostRestriction"] else "")
         logger.info("Scheduled %d users at %s" % (len(scheduled_ids), datetime.utcnow()))
 

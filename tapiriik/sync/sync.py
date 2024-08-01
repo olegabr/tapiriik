@@ -147,6 +147,9 @@ class Sync:
             message.ack()
             return
 
+        # logger.info("Consume task for user " + str(user["_id"]))
+        message.ack()
+
         def heartbeat_callback(state):
             heartbeat_callback_direct(state, user_id)
 
@@ -196,6 +199,7 @@ class Sync:
             else:
                 reschedule_update["$unset"]["NextSyncIsExhaustive"] = ""
 
+            # logger.info("Unset QueuedAt for user " + str(user["_id"]))
             scheduling_result = db.users.update(
                 {
                     "_id": user["_id"]
@@ -211,7 +215,7 @@ class Sync:
             syncTime = (datetime.utcnow() - syncStart).total_seconds()
             db.sync_worker_stats.insert({"Timestamp": datetime.utcnow(), "Worker": os.getpid(), "Host": socket.gethostname(), "TimeTaken": syncTime})
 
-        message.ack()
+        # message.ack()
 
     def PerformUserSync(user, exhaustive=False, heartbeat_callback=None):
         return SynchronizationTask(user).Run(exhaustive=exhaustive, heartbeat_callback=heartbeat_callback)
