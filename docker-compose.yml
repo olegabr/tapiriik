@@ -3,6 +3,8 @@ services:
   tapiriik_redis:
     image: redis
     restart: always
+    volumes:
+      - redis_data:/data:rw
     healthcheck: # @see https://stackoverflow.com/a/71504657/4256005
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 1s
@@ -224,6 +226,7 @@ services:
 volumes:
   rabbitmq_data:
   mongo_data:
+  redis_data:
   tapiriik_data:
   tapiriik_session_data:
   tapiriik_user_logs:
